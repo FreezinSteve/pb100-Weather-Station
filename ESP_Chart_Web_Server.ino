@@ -85,7 +85,7 @@ const int BUFF_SIZE = 144;
 //  char WindGustSpeed[5];         // xx.x
 //};
 const int BP_COL = 0;
-const int TM_COL = 1;
+const int TE_COL = 1;
 const int RH_COL = 2;
 const int WD_COL = 3;
 const int WS_COL = 4;
@@ -93,7 +93,7 @@ const int GD_COL = 5;
 const int GS_COL = 6;
 
 #define BP_ID "bp"
-#define TM_ID "tm"
+#define TM_ID "te"
 #define RH_ID "rh"
 #define WD_ID "wd"
 #define WS_ID "ws"
@@ -144,7 +144,7 @@ bool connect(int timeout) {
   Serial.println(ssid);
 
   WiFi.mode(WIFI_STA);
-   // Configures static IP address
+  // Configures static IP address
   WiFi.config(staticIP, gateway, subnet, dns1, dns2);
   WiFi.begin(ssid, password);
 
@@ -162,7 +162,7 @@ bool connect(int timeout) {
     if (timeout > 0)
     {
       // Only try for 15 seconds.
-      if (millis() - wifiConnectStart > 15000) {
+      if (millis() - wifiConnectStart > timeout) {
         Serial.println("Failed to connect to WiFi");
         return false;
       }
@@ -452,7 +452,7 @@ void saveLog()
   }
   tempTotal = 0;
   tempCount = 0;
-  dtostrf(mean, -6, 1, logBuffer[logPointer].Data[TM_COL]);
+  dtostrf(mean, -6, 1, logBuffer[logPointer].Data[TE_COL]);
 
   if (rhCount > 0)
   {
@@ -516,7 +516,7 @@ void saveLog()
 //------------------------------------------------------------
 String getCurrentValue(int sensor)
 {
-  if (sensor == TM_COL)
+  if (sensor == TE_COL)
   {
     return String(temp);
   }
@@ -586,7 +586,7 @@ int getSensorIndex(String sensor)
 {
   if (sensor == TM_ID)
   {
-    return TM_COL;
+    return TE_COL;
   }
   else if (sensor == RH_ID)
   {
@@ -644,23 +644,110 @@ String listFiles()
 //------------------------------------------------------------
 void initServerRoutes()
 {
-  // Route for root / web page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send(SPIFFS, "/index.html");
+  // Handle specific files mapping to the .gz compressed file
+  server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
   });
 
-  // Test web page
-  server.on("/test.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send(SPIFFS, "/test.html");
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/favicon.ico.gz", "text/plain");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/feather.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/feather.min.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
   });
 
   server.on("/highcharts.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/highcharts.js.gz", "text/plain");
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/highcharts.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
-    //request->send(SPIFFS, "/highcharts.js");
   });
 
+  server.on("/highcharts-more.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/highcharts-more.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/jquery.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/jquery.min.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/logdata.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/logdata.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/logdatawind.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/logdatawind.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/PB100.png", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/pb100.png.gz", "text/plain");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/realtime.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/realtime.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/scripts.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/scripts.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/settings.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/solid-gauge.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/solid-gauge.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/styles.css", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/styles.css.gz", "text/css");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/summary.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/summary.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  server.on("/windbarb.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/windbarb.js.gz", "text/javascript");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+  // API calls
   server.on("/sensor", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (!request->hasParam("id"))
     {
@@ -705,13 +792,40 @@ void initServerRoutes()
   server.on("/heapfree", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", String(ESP.getFreeHeap()).c_str());
   });
+
   server.on("/time", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", getISO8601Time(false));
   });
+
   server.on("/files", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", listFiles().c_str());
   });
+
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", getStatus().c_str());
+  });
+
 }
+
+String getStatus()
+{
+  //{"dt": "2021-08-07T20:19:47", "te": "5.4", "ws": "99.5", "wd": "235", "rh": "19.0", "bp": "1052.2"}
+  String response = "{\"dt\": \"";
+  response += String(getISO8601Time(false));
+  response += "\", \"te\": \"";
+  response += getCurrentValue(TE_COL);
+  response += "\", \"ws\": \"";
+  response += getCurrentValue(WS_COL);
+  response += "\", \"wd\": \"";
+  response += getCurrentValue(WD_COL);
+  response += "\", \"rh\": \"";
+  response += getCurrentValue(RH_COL);
+  response += "\", \"bp\": \"";
+  response += getCurrentValue(BP_COL);
+  response += "\"}";
+  return response;
+}
+
 //================================================================
 
 void getTemp102()
@@ -740,7 +854,6 @@ void getTemp102()
 void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
-  pinMode(LED_BUILTIN, OUTPUT);
 
   Wire.begin(); // start the I2C library
 
@@ -760,11 +873,12 @@ void setup() {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
+  pinMode(LED_BUILTIN, OUTPUT);
 
-  if (!connect(-1))
+  if (!connect(15000))
   {
-    // Switch to STA mode
-
+    // TODO:Switch to STA mode
+    ESP.restart();
   }
 
   // Print Local IP Address
