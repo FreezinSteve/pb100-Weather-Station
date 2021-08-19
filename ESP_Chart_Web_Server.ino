@@ -53,27 +53,28 @@ float wspdGust = 0;
 float wdirGust = 0;
 
 int timeYear = 0;
-int timeMonth = 0;
-int timeDay = 0;
-int timeHour = 0;
-int timeMinute = 0;
-int timeSecond = 0;
+byte timeMonth = 0;
+byte timeDay = 0;
+byte timeHour = 0;
+byte timeMinute = 0;
+byte timeSecond = 0;
 
 int nextLog = -1;
 const int logInt = 10;      // 10 minutes
-int restartFlag = 0;
+byte restartFlag = 0;
+byte lastLogDay = 0;
 
-const int BUFF_SIZE = 144;
-const int BP_COL = 0;
-const int TE_COL = 1;
-const int RH_COL = 2;
-const int WD_COL = 3;
-const int WS_COL = 4;
-const int GD_COL = 5;
-const int GS_COL = 6;
+const byte BUFF_SIZE = 144;
+const byte BP_COL = 0;
+const byte TE_COL = 1;
+const byte RH_COL = 2;
+const byte WD_COL = 3;
+const byte WS_COL = 4;
+const byte GD_COL = 5;
+const byte GS_COL = 6;
 
 #define BP_ID "bp"
-#define TM_ID "te"
+#define TE_ID "te"
 #define RH_ID "rh"
 #define WD_ID "wd"
 #define WS_ID "ws"
@@ -86,12 +87,14 @@ const int GS_COL = 6;
 // Store the log record as strings. This minimises processing when retrieving log data
 // at the expense of RAM. We could possibly change to uint32 for time and float for data values.
 // This would save about 40% RAM
+#define LOGITEMS_COUNT 7
+const byte LOGFILEDAYS = 7;
 struct LogRecord {
   char TimeStamp[20];
-  char Data[7][7];    // 7 items of 7 characters each
+  char Data[LOGITEMS_COUNT][7];    // 7 items of 7 characters each
 };
 LogRecord logBuffer[BUFF_SIZE];
-int logPointer = 0;
+byte logPointer = 0;
 bool logBufferWrapped = false;
 
 
@@ -393,20 +396,78 @@ void checkLog()
     setNextLog();
     Serial.print("Next log set to: ");
     Serial.println(nextLog);
+    if (timeDay != lastLogDay && timeHour == 0 && timeMinute == 0)
+    {
+      saveDailyData();
+      lastLogDay = timeDay;
+    }
   }
 }
 
 //------------------------------------------------------------
-// On midnight, dump the data to 
+// On midnight, dump the data to
 // To maintain a 7 day rolling buffer
 // rename "temperature.6" to "temperature.7"
 //        "temperature.5" to "temperature.6"
 //        ...
 // write  "temperature.0"
 //------------------------------------------------------------
-void checkMidnight()
+void saveDailyData()
 {
-  //TODO:
+  //// Store the log record as strings. This minimises processing when retrieving log data
+  //// at the expense of RAM. We could possibly change to uint32 for time and float for data values.
+  //// This would save about 40% RAM
+  //struct LogRecord {
+  //  char TimeStamp[20];
+  //  char Data[7][7];    // 7 items of 7 characters each
+  //};
+  //LogRecord logBuffer[BUFF_SIZE];
+  //int logPointer = 0;
+  //bool logBufferWrapped = false;
+
+  // Rename file day extentions e.g te.0 becomes te.1 etc.
+  // latest data is then logged to te.0
+  for (byte i = 0; i < LOGITEMS_COUNT; i++)
+  {
+    char* sensorCode = getSensorCode(i);
+    shiftFiles(sensorCode);
+    saveToFile(i, sensorCode);
+  }
+}
+
+void shiftFiles(char* id)
+{
+  char srcfile[] = "/ID.X\0";   // e.g. /te.0
+  char dstfile[] = "/ID.X\0";   // e.g. /te.0
+
+  memcpy(&srcfile[1], id, 2);
+  memcpy(&dstfile[1], id, 2);
+
+  dstfile[4] = (char)LOGFILEDAYS;
+  srcfile[4] = (char)(LOGFILEDAYS - 1);
+  // Delete the oldest file e.g te.7
+  if (SPIFFS.exists(dstfile))
+  {
+    SPIFFS.remove(dstfile);
+  }
+  for (int i = LOGFILEDAYS - 1; i > 0; i--)
+  {
+    if (SPIFFS.exists(srcfile))
+    {
+      SPIFFS.rename(srcfile, dstfile);
+    }
+    dstfile[4] = (char)i;
+    srcfile[4] = (char)(i - 1);
+  }
+}
+
+void saveToFile(byte sensorId, char* sensorCode)
+{
+  char srcfile[] = "/ID.0\0";
+  memcpy(&srcfile[1], sensorCode, 2);
+  File f = SPIFFS.open(srcfile, "w");
+  f.write(getCurrentData(sensorId));
+  f.close();
 }
 
 //------------------------------------------------------------
@@ -414,8 +475,8 @@ void checkMidnight()
 //------------------------------------------------------------
 void setNextLog()
 {
-  //nextLog = ((timeMinute / 10) * 10) + 10;
-  nextLog = timeMinute + 1;
+  nextLog = ((timeMinute / 10) * 10) + 10;
+  //nextLog = timeMinute + 1;
   if (nextLog >= 60)
   {
     nextLog -= 60;
@@ -579,12 +640,13 @@ char* getCurrentData(int sensor)
   return buffer;
 }
 
+
 //------------------------------------------------------------
 // Map sensor name to column index
 //------------------------------------------------------------
 int getSensorIndex(String sensor)
 {
-  if (sensor == TM_ID)
+  if (sensor == TE_ID)
   {
     return TE_COL;
   }
@@ -615,6 +677,46 @@ int getSensorIndex(String sensor)
   else
   {
     return -1;
+  }
+}
+
+
+//------------------------------------------------------------
+// Map column index to sensor name
+//------------------------------------------------------------
+char* getSensorCode(int column)
+{
+  if (column == TE_COL)
+  {
+    return TE_ID;
+  }
+  else if (column == RH_COL)
+  {
+    return RH_ID;
+  }
+  else if (column == BP_COL)
+  {
+    return BP_ID;
+  }
+  else if (column == WD_COL)
+  {
+    return WD_ID;
+  }
+  else if (column == WS_COL)
+  {
+    return WS_ID;
+  }
+  else if (column == GD_COL)
+  {
+    return GD_ID;
+  }
+  else if (column == GS_COL)
+  {
+    return GS_ID;
+  }
+  else
+  {
+    return TE_ID;
   }
 }
 
@@ -651,14 +753,15 @@ void initServerRoutes()
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
-  server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
+
+  server.on("/app.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
-  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/favicon.ico.gz", "text/plain");
+  server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
@@ -906,26 +1009,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   return true;
 }
 
-void debugSettings()
-{
-  Serial.print("SSID: ");
-  for (int i = 0; i < 20; i++)
-  {
-    Serial.print("[");
-    Serial.print((byte)userSSID[i]);
-    Serial.print("]");
-  }
-  Serial.println();
-  Serial.print("PASS: ");
-  for (int i = 0; i < 20; i++)
-  {
-    Serial.print("[");
-    Serial.print((byte)userPass[i]);
-    Serial.print("]");
-  }
-  Serial.println();
-}
-
 // Load setttings from file
 bool loadSettings()
 {
@@ -1080,7 +1163,7 @@ void loop() {
 
 void delayWithYield(int delayTime)
 {
-  for (int i=0; i<delayTime/5; i++)
+  for (int i = 0; i < delayTime / 5; i++)
   {
     delay(5);
     yield();
