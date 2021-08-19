@@ -1,42 +1,31 @@
-/*********
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*********/
-
-// Import required libraries
-#ifdef ESP32
-#include <WiFi.h>
-#include <ESPAsyncWebServer.h>
-#include <SPIFFS.h>
-#else
-#include <Arduino.h>
+// for ESP8266
 #include <ESP8266WiFi.h>
-#include <Hash.h>
 #include <ESPAsyncTCP.h>
+
 #include <ESPAsyncWebServer.h>
-#include <FS.h>
-#endif
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
 #include <SoftwareSerial.h>
 #include <NMEAParser.h>
+#include <WiFiUdp.h>
+#include <TimeLib.h>
 
-// Replace with your network credentials
-#include "credentials.h"
-//const char* ssid     = "xxxx";
-//const char* password = "xxxx";
-IPAddress staticIP(192, 168, 1, 80);
-IPAddress gateway(192, 168, 1, 250);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns1(8, 8, 8, 8);  //DNS
 IPAddress dns2(8, 8, 4, 4);  //DNS
+
+const char* apSSID = "Weather Station";
+IPAddress apIP(192, 168, 1, 100);
+IPAddress apGateway(192, 168, 1, 100);
+IPAddress apSubnet(255, 255, 255, 0);
+
+char userSSID[20];
+char userPass[20];
+char userIP[20] = "192.168.1.100";        //xxx.xxx.xxx.xxx\0
+char userGateway[20] = "192.168.1.250";   //xxx.xxx.xxx.xxx\0
+bool apMode = false;
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
 
 #define BAUD_RATE 4800
 SoftwareSerial pb100Serial;
@@ -72,18 +61,9 @@ int timeSecond = 0;
 
 int nextLog = -1;
 const int logInt = 10;      // 10 minutes
+int restartFlag = 0;
 
 const int BUFF_SIZE = 144;
-//struct LogRecord {
-//  char TimeStamp[20]; //dd-mm-yyyyThh:mm:ss
-//  char BarometricPressure[7];  //xxxx.x
-//  char Temperature[6];          //-xx.x
-//  char RH[5];                  // xx.x
-//  char WindDirection[4];         // xxx
-//  char WindSpeed[5];            // xx.x
-//  char WindGustDirection[4];     // xxx
-//  char WindGustSpeed[5];         // xx.x
-//};
 const int BP_COL = 0;
 const int TE_COL = 1;
 const int RH_COL = 2;
@@ -100,7 +80,6 @@ const int GS_COL = 6;
 #define GD_ID "gd"
 #define GS_ID "gs"
 
-#include "Wire.h"
 #define TMP102_I2C_ADDRESS 72 /* This is the I2C address for our chip. This value is correct if you tie the ADD0 pin to ground. See the datasheet for some other values. */
 
 
@@ -115,13 +94,10 @@ LogRecord logBuffer[BUFF_SIZE];
 int logPointer = 0;
 bool logBufferWrapped = false;
 
-// Create AsyncWebServer object on port 80
-AsyncWebServer server(80);
 
 //================================================================
 // NTP time synch
-#include <WiFiUdp.h>
-#include <TimeLib.h>
+
 static const char ntpServerName[] = "nz.pool.ntp.org";
 const int timeZone = 0;     // UTC
 const unsigned int localPort = 8888;  // local port to listen for UDP packets
@@ -135,29 +111,44 @@ int lastSecond = 0;
 //================================================================
 // Connection methods
 //================================================================
-bool connect(int timeout) {
+bool connectSTA(int timeout) {
 
   // Connect to Wifi.
   Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+  Serial.print("Connecting to '");
+  Serial.print(userSSID);
+  Serial.println("'");
+  Serial.print("Using password '");
+  Serial.print(userPass);
+  Serial.println("'");
+
+  IPAddress ip;
+
+  int ip1 = 0, ip2 = 0, ip3 = 0, ip4 = 0 ;
+  if (sscanf(userIP, "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
+    ip = IPAddress(ip1, ip2, ip3, ip4);
+  }
+  Serial.println(ip);
+  IPAddress gateway;
+  if (sscanf(userGateway, "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
+    gateway = IPAddress(ip1, ip2, ip3, ip4);
+  }
+  Serial.println(gateway);
 
   WiFi.mode(WIFI_STA);
   // Configures static IP address
-  WiFi.config(staticIP, gateway, subnet, dns1, dns2);
-  WiFi.begin(ssid, password);
-
+  WiFi.config(ip, gateway, subnet, dns1, dns2);
+  WiFi.begin(userSSID, userPass);
   unsigned long wifiConnectStart = millis();
 
   while (WiFi.status() != WL_CONNECTED) {
     // Check to see if
     if (WiFi.status() == WL_CONNECT_FAILED) {
       Serial.println("Failed to connect to WiFi. Please verify credentials: ");
-      delay(10000);
+      return false;
     }
 
-    delay(500);
+    delayWithYield(500);
     Serial.println("...");
     if (timeout > 0)
     {
@@ -178,6 +169,15 @@ bool connect(int timeout) {
   Serial.println("Connected!");
   Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
   return true;
+}
+
+void connectAP()
+{
+  Serial.println("Starting AP mode");
+  WiFi.softAP(apSSID);    // open network
+  WiFi.softAPConfig(apIP, apGateway, apSubnet);
+  delayWithYield(100);
+  apMode = true;
 }
 //==============================================================================
 // NTP Methods
@@ -397,7 +397,7 @@ void checkLog()
 }
 
 //------------------------------------------------------------
-// On midnight, dump the data to SPIFFS
+// On midnight, dump the data to 
 // To maintain a 7 day rolling buffer
 // rename "temperature.6" to "temperature.7"
 //        "temperature.5" to "temperature.6"
@@ -518,23 +518,23 @@ String getCurrentValue(int sensor)
 {
   if (sensor == TE_COL)
   {
-    return String(temp);
+    return String(temp, 1);
   }
   else if (sensor == RH_COL)
   {
-    return String(bp);
+    return String(bp, 1);
   }
   else if (sensor == BP_COL)
   {
-    return String(rh);
+    return String(rh, 1);
   }
   else if (sensor == WD_COL)
   {
-    return String(wdir);
+    return String(wdir, 0);
   }
   else if (sensor == WS_COL)
   {
-    return String(wspd);
+    return String(wspd, 1);
   }
 }
 
@@ -644,7 +644,13 @@ String listFiles()
 //------------------------------------------------------------
 void initServerRoutes()
 {
-  // Handle specific files mapping to the .gz compressed file
+  //======================================================================
+  // File handlers with compression
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
   server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
     AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
@@ -746,8 +752,39 @@ void initServerRoutes()
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
+  //======================================================================
+  // Load / Save settings API
+  server.on("/update-settings", HTTP_POST, [](AsyncWebServerRequest * request) {}, NULL, [](AsyncWebServerRequest * request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (saveSettings((char*)data, len, index, total))
+    {
+      request->send(200);
+    }
+    else
+    {
+      request->send(500);
+    }
+  });
 
-  // API calls
+  server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest * request) {
+    //request->send(200);
+    request->send_P(200, "text/plain", "Rebooting module");
+    restartFlag = 1;
+  });
+
+  server.on("/read-settings", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (SPIFFS.exists("/settings.txt"))
+    {
+      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.txt", "text/plain");
+      request->send(response);
+    }
+    else
+    {
+      request->send(200);
+    }
+  });
+
+  //======================================================================
+  // Data API
   server.on("/sensor", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (!request->hasParam("id"))
     {
@@ -793,10 +830,6 @@ void initServerRoutes()
     request->send_P(200, "text/plain", String(ESP.getFreeHeap()).c_str());
   });
 
-  server.on("/time", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send_P(200, "text/plain", getISO8601Time(false));
-  });
-
   server.on("/files", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", listFiles().c_str());
   });
@@ -804,7 +837,6 @@ void initServerRoutes()
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", getStatus().c_str());
   });
-
 }
 
 String getStatus()
@@ -826,6 +858,117 @@ String getStatus()
   return response;
 }
 
+bool saveSettings(char *data, size_t len, size_t index, size_t total)
+{
+  // Convert \n to \0
+  Serial.println("New settings received:");
+  for (size_t i = 0; i < len; i++) {
+    Serial.print(data[i]);
+    if (data[i] == 10)
+    {
+      data[i] = 0;
+    }
+  }
+  Serial.println();
+
+  int pos = 0;
+  size_t retlen = strlcpy(userSSID, data, 20);
+  pos = pos + retlen + 1;
+
+  retlen = strlcpy(userPass, &data[pos], 20);
+  pos = pos + retlen + 1;
+
+  retlen = strlcpy(userIP, &data[pos], 20);
+  pos = pos + retlen + 1;
+
+  if (pos >= len)
+  {
+    Serial.println("Invalid settings, not saving");
+    return false;
+  }
+
+  // Whatever else is left is the gateway. This won't be null terminated
+  memcpy(userGateway, &data[pos], 20);
+  memset(&userGateway[len - pos], '\0', 1);
+
+  File file = SPIFFS.open("/settings.txt", "w");
+  // Save to SPIFFS
+  if (!file) {
+    Serial.println("There was an error opening the settings file for writing");
+    return false;
+  }
+  file.println(userSSID);
+  file.println(userPass);
+  file.println(userIP);
+  file.println(userGateway);
+  file.close();
+  Serial.println("New settings saved");
+  return true;
+}
+
+void debugSettings()
+{
+  Serial.print("SSID: ");
+  for (int i = 0; i < 20; i++)
+  {
+    Serial.print("[");
+    Serial.print((byte)userSSID[i]);
+    Serial.print("]");
+  }
+  Serial.println();
+  Serial.print("PASS: ");
+  for (int i = 0; i < 20; i++)
+  {
+    Serial.print("[");
+    Serial.print((byte)userPass[i]);
+    Serial.print("]");
+  }
+  Serial.println();
+}
+
+// Load setttings from file
+bool loadSettings()
+{
+  if (SPIFFS.exists("/settings.txt"))
+  {
+    File file = SPIFFS.open("/settings.txt", "r");
+    if (!file) {
+      Serial.println("There was an error opening the file for writing");
+      return false;
+    }
+    char buffer[20];
+    if (file.available()) {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      memcpy(userSSID, buffer, 20);
+    }
+    if (file.available()) {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      memcpy(userPass, buffer, 20);
+    }
+    if (file.available()) {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      memcpy(userIP, buffer, 20);
+    }
+    if (file.available()) {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      memcpy(userGateway, buffer, 20);
+    }
+  }
+  else
+  {
+    Serial.println("No settings file");
+  }
+}
+
+void restartWithDelay()
+{
+  delayWithYield(1000);
+  ESP.restart();
+}
 //================================================================
 
 void getTemp102()
@@ -873,12 +1016,15 @@ void setup() {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
-  pinMode(LED_BUILTIN, OUTPUT);
+  loadSettings();
 
-  if (!connect(15000))
+  pinMode(LED_BUILTIN, OUTPUT);
+  if (strlen(userSSID) == 0)
   {
-    // TODO:Switch to STA mode
-    ESP.restart();
+    connectAP();
+  } else if (!connectSTA(15000))
+  {
+    connectAP();
   }
 
   // Print Local IP Address
@@ -897,6 +1043,12 @@ void setup() {
 
 void loop() {
 
+  if (restartFlag != 0)
+  {
+    Serial.println("Restarting");
+    restartWithDelay();
+  }
+
   while (pb100Serial.available()) {
     parser << pb100Serial.read();
     yield();
@@ -914,7 +1066,23 @@ void loop() {
     timeMinute = minute();
     checkLog();
     digitalWrite(LED_BUILTIN, LOW);
-    delay(20);
+    delayWithYield(20);
     digitalWrite(LED_BUILTIN, HIGH);
+    if (apMode)
+    {
+      delayWithYield(100);
+      digitalWrite(LED_BUILTIN, LOW);
+      delayWithYield(20);
+      digitalWrite(LED_BUILTIN, HIGH);
+    }
+  }
+}
+
+void delayWithYield(int delayTime)
+{
+  for (int i=0; i<delayTime/5; i++)
+  {
+    delay(5);
+    yield();
   }
 }
