@@ -23,6 +23,7 @@ char userSSID[20];
 char userPass[20];
 char userIP[20] = "192.168.1.100";        //xxx.xxx.xxx.xxx\0
 char userGateway[20] = "192.168.1.250";   //xxx.xxx.xxx.xxx\0
+
 bool apMode = false;
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -100,9 +101,8 @@ bool logBufferWrapped = false;
 
 //================================================================
 // NTP time synch
-
 static const char ntpServerName[] = "nz.pool.ntp.org";
-const int timeZone = 0;     // UTC
+const int timeZone = 12;     // NZST 
 const unsigned int localPort = 8888;  // local port to listen for UDP packets
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
@@ -117,26 +117,17 @@ int lastSecond = 0;
 bool connectSTA(int timeout) {
 
   // Connect to Wifi.
-  Serial.println();
-  Serial.print("Connecting to '");
-  Serial.print(userSSID);
-  Serial.println("'");
-  Serial.print("Using password '");
-  Serial.print(userPass);
-  Serial.println("'");
-
   IPAddress ip;
 
   int ip1 = 0, ip2 = 0, ip3 = 0, ip4 = 0 ;
   if (sscanf(userIP, "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
     ip = IPAddress(ip1, ip2, ip3, ip4);
   }
-  Serial.println(ip);
+
   IPAddress gateway;
   if (sscanf(userGateway, "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
     gateway = IPAddress(ip1, ip2, ip3, ip4);
   }
-  Serial.println(gateway);
 
   WiFi.mode(WIFI_STA);
   // Configures static IP address
@@ -147,36 +138,24 @@ bool connectSTA(int timeout) {
   while (WiFi.status() != WL_CONNECTED) {
     // Check to see if
     if (WiFi.status() == WL_CONNECT_FAILED) {
-      Serial.println("Failed to connect to WiFi. Please verify credentials: ");
       return false;
     }
 
     delayWithYield(500);
-    Serial.println("...");
     if (timeout > 0)
     {
       // Only try for 15 seconds.
       if (millis() - wifiConnectStart > timeout) {
-        Serial.println("Failed to connect to WiFi");
         return false;
       }
     }
     yield();
   }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.println();
-  Serial.println("Connected!");
-  Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
   return true;
 }
 
 void connectAP()
 {
-  Serial.println("Starting AP mode");
   WiFi.softAP(apSSID);    // open network
   WiFi.softAPConfig(apIP, apGateway, apSubnet);
   delayWithYield(100);
@@ -387,15 +366,13 @@ void checkLog()
   {
     // Not initialised yet
     setNextLog();
-    Serial.print("Next log initialised to: ");
     Serial.println(nextLog);
   }
   if (nextLog == timeMinute)
   {
     saveLog();
     setNextLog();
-    Serial.print("Next log set to: ");
-    Serial.println(nextLog);
+
     if (timeDay != lastLogDay && timeHour == 0 && timeMinute == 0)
     {
       saveDailyData();
@@ -414,17 +391,6 @@ void checkLog()
 //------------------------------------------------------------
 void saveDailyData()
 {
-  //// Store the log record as strings. This minimises processing when retrieving log data
-  //// at the expense of RAM. We could possibly change to uint32 for time and float for data values.
-  //// This would save about 40% RAM
-  //struct LogRecord {
-  //  char TimeStamp[20];
-  //  char Data[7][7];    // 7 items of 7 characters each
-  //};
-  //LogRecord logBuffer[BUFF_SIZE];
-  //int logPointer = 0;
-  //bool logBufferWrapped = false;
-
   // Rename file day extentions e.g te.0 becomes te.1 etc.
   // latest data is then logged to te.0
   for (byte i = 0; i < LOGITEMS_COUNT; i++)
@@ -443,21 +409,22 @@ void shiftFiles(char* id)
   memcpy(&srcfile[1], id, 2);
   memcpy(&dstfile[1], id, 2);
 
-  dstfile[4] = (char)LOGFILEDAYS;
-  srcfile[4] = (char)(LOGFILEDAYS - 1);
+  dstfile[4] = (char)(LOGFILEDAYS+48);
+  srcfile[4] = (char)(LOGFILEDAYS + 48 - 1);
   // Delete the oldest file e.g te.7
   if (SPIFFS.exists(dstfile))
   {
     SPIFFS.remove(dstfile);
   }
-  for (int i = LOGFILEDAYS - 1; i > 0; i--)
+  
+  for (int i = LOGFILEDAYS - 1; i >= 0; i--)
   {
     if (SPIFFS.exists(srcfile))
     {
       SPIFFS.rename(srcfile, dstfile);
     }
-    dstfile[4] = (char)i;
-    srcfile[4] = (char)(i - 1);
+    dstfile[4] = (char)(i + 48);
+    srcfile[4] = (char)(i + 48 - 1);
   }
 }
 
@@ -747,7 +714,7 @@ String listFiles()
 void initServerRoutes()
 {
   //======================================================================
-  // File handlers with compression
+  // File handlers with compression. Must be an easier way of handling multiple files...
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
     AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
@@ -870,7 +837,7 @@ void initServerRoutes()
 
   server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest * request) {
     //request->send(200);
-    request->send_P(200, "text/plain", "Rebooting module");
+    request->send_P(200, "text/plain", "Rebooting module, wait for module to connect to WiFi before continuing");
     restartFlag = 1;
   });
 
@@ -964,7 +931,6 @@ String getStatus()
 bool saveSettings(char *data, size_t len, size_t index, size_t total)
 {
   // Convert \n to \0
-  Serial.println("New settings received:");
   for (size_t i = 0; i < len; i++) {
     Serial.print(data[i]);
     if (data[i] == 10)
@@ -972,7 +938,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
       data[i] = 0;
     }
   }
-  Serial.println();
 
   int pos = 0;
   size_t retlen = strlcpy(userSSID, data, 20);
@@ -986,7 +951,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
 
   if (pos >= len)
   {
-    Serial.println("Invalid settings, not saving");
     return false;
   }
 
@@ -997,7 +961,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   File file = SPIFFS.open("/settings.txt", "w");
   // Save to SPIFFS
   if (!file) {
-    Serial.println("There was an error opening the settings file for writing");
     return false;
   }
   file.println(userSSID);
@@ -1005,7 +968,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   file.println(userIP);
   file.println(userGateway);
   file.close();
-  Serial.println("New settings saved");
   return true;
 }
 
@@ -1016,7 +978,6 @@ bool loadSettings()
   {
     File file = SPIFFS.open("/settings.txt", "r");
     if (!file) {
-      Serial.println("There was an error opening the file for writing");
       return false;
     }
     char buffer[20];
@@ -1040,10 +1001,6 @@ bool loadSettings()
       buffer[l - 1] = 0;
       memcpy(userGateway, buffer, 20);
     }
-  }
-  else
-  {
-    Serial.println("No settings file");
   }
 }
 
@@ -1109,10 +1066,6 @@ void setup() {
   {
     connectAP();
   }
-
-  // Print Local IP Address
-  Serial.println(WiFi.localIP());
-
   initServerRoutes();
 
   // Start server
@@ -1128,7 +1081,6 @@ void loop() {
 
   if (restartFlag != 0)
   {
-    Serial.println("Restarting");
     restartWithDelay();
   }
 
@@ -1141,6 +1093,7 @@ void loop() {
   if (timeSecond != lastSecond)
   {
     getTemp102();
+    // Capture time now incase processing takes longer than 1 second
     lastSecond = timeSecond;
     timeYear = year();
     timeMonth = month();
@@ -1161,6 +1114,7 @@ void loop() {
   }
 }
 
+// Does delay() call yield() already?
 void delayWithYield(int delayTime)
 {
   for (int i = 0; i < delayTime / 5; i++)
