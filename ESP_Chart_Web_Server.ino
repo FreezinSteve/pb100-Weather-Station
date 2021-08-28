@@ -102,7 +102,7 @@ bool logBufferWrapped = false;
 //================================================================
 // NTP time synch
 static const char ntpServerName[] = "nz.pool.ntp.org";
-const int timeZone = 12;     // NZST 
+const int timeZone = 12;     // NZST
 const unsigned int localPort = 8888;  // local port to listen for UDP packets
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
@@ -282,25 +282,25 @@ char* getISO8601Time(boolean zeroSeconds)
 void handleWIMDA(void)
 {
   float result;
-  if (parser.getArg(3, result))
+  if (parser.getArg(2, result))
   {
-    bp = result;
+    bp = result * 1000;
     bpTotal += bp;
     bpCount++;
   }
-  if (parser.getArg(5, result))
+  if (parser.getArg(4, result))
   {
     temp = result;
     tempTotal += temp;
     tempCount++;
   }
-  if (parser.getArg(9, result))
+  if (parser.getArg(8, result))
   {
     rh = result;
     rhTotal += rh;
     rhCount++;
   }
-  if (parser.getArg(13, result))
+  if (parser.getArg(12, result))
   {
     wdir = result;
     float wdirRad = (wdir * 71) / 4068;
@@ -308,7 +308,7 @@ void handleWIMDA(void)
     wdirCosTotal += cos(wdirRad);
     wdirCount++;
   }
-  if (parser.getArg(19, result))
+  if (parser.getArg(18, result))
   {
     wspd = result;
     wspdTotal += wspd;
@@ -326,6 +326,7 @@ void handleWIMDA(void)
 //------------------------------------------------------------
 void handleGPZDA(void)
 {
+  Serial.println("GPZDA received");
   int result = 0;
   if (parser.getArg(1, result))
   {
@@ -366,18 +367,18 @@ void checkLog()
   {
     // Not initialised yet
     setNextLog();
-    Serial.println(nextLog);
   }
   if (nextLog == timeMinute)
   {
-    saveLog();
-    setNextLog();
-
     if (timeDay != lastLogDay && timeHour == 0 && timeMinute == 0)
     {
-      saveDailyData();
+      // Shift before we log the midnight record so a day starts on midnight
+      shiftFiles();
       lastLogDay = timeDay;
     }
+    saveLog();
+    saveDailyData();
+    setNextLog();
   }
 }
 
@@ -396,35 +397,38 @@ void saveDailyData()
   for (byte i = 0; i < LOGITEMS_COUNT; i++)
   {
     char* sensorCode = getSensorCode(i);
-    shiftFiles(sensorCode);
     saveToFile(i, sensorCode);
   }
 }
 
-void shiftFiles(char* id)
+void shiftFiles()
 {
-  char srcfile[] = "/ID.X\0";   // e.g. /te.0
-  char dstfile[] = "/ID.X\0";   // e.g. /te.0
-
-  memcpy(&srcfile[1], id, 2);
-  memcpy(&dstfile[1], id, 2);
-
-  dstfile[4] = (char)(LOGFILEDAYS+48);
-  srcfile[4] = (char)(LOGFILEDAYS + 48 - 1);
-  // Delete the oldest file e.g te.7
-  if (SPIFFS.exists(dstfile))
+  for (byte i = 0; i < LOGITEMS_COUNT; i++)
   {
-    SPIFFS.remove(dstfile);
-  }
-  
-  for (int i = LOGFILEDAYS - 1; i >= 0; i--)
-  {
-    if (SPIFFS.exists(srcfile))
+    char* sensorCode = getSensorCode(i);
+    char srcfile[] = "/ID.X\0";   // e.g. /te.0
+    char dstfile[] = "/ID.X\0";   // e.g. /te.0
+
+    memcpy(&srcfile[1], sensorCode, 2);
+    memcpy(&dstfile[1], sensorCode, 2);
+
+    dstfile[4] = (char)(LOGFILEDAYS + 48);
+    srcfile[4] = (char)(LOGFILEDAYS + 48 - 1);
+    // Delete the oldest file e.g te.7
+    if (SPIFFS.exists(dstfile))
     {
-      SPIFFS.rename(srcfile, dstfile);
+      SPIFFS.remove(dstfile);
     }
-    dstfile[4] = (char)(i + 48);
-    srcfile[4] = (char)(i + 48 - 1);
+
+    for (int i = LOGFILEDAYS - 1; i >= 0; i--)
+    {
+      if (SPIFFS.exists(srcfile))
+      {
+        SPIFFS.rename(srcfile, dstfile);
+      }
+      dstfile[4] = (char)(i + 48);
+      srcfile[4] = (char)(i + 48 - 1);
+    }
   }
 }
 
@@ -455,7 +459,7 @@ void setNextLog()
 //------------------------------------------------------------
 void saveLog()
 {
-  strcpy(logBuffer[logPointer].TimeStamp, getISO8601Time(false));
+  strcpy(logBuffer[logPointer].TimeStamp, getISO8601Time(true));
   float mean = 0;
   // Calculate mean and max and save
   if (bpCount > 0)
@@ -550,11 +554,11 @@ String getCurrentValue(int sensor)
   }
   else if (sensor == RH_COL)
   {
-    return String(bp, 1);
+    return String(rh, 1);
   }
   else if (sensor == BP_COL)
   {
-    return String(rh, 1);
+    return String(bp, 1);
   }
   else if (sensor == WD_COL)
   {
@@ -873,22 +877,22 @@ void initServerRoutes()
     if (request->hasParam("day"))
     {
       String day = request->getParam("day")->value();
-      if (day == "0")
+      //      if (day == "0")
+      //      {
+      //        request->send_P(200, "text/plain", getCurrentData(sensor));
+      //      }
+      //      else
+      //      {
+      String filePath = "/" + id + "." + day;
+      if (SPIFFS.exists(filePath))
       {
-        request->send_P(200, "text/plain", getCurrentData(sensor));
+        request->send(SPIFFS, filePath, "text/plain");
       }
       else
       {
-        String filePath = "/" + id + "." + day;
-        if (SPIFFS.exists(filePath))
-        {
-          request->send(SPIFFS, filePath, "text/plain");
-        }
-        else
-        {
-          request->send_P(400, "text/plain", "ERROR: no data available");
-        }
+        request->send_P(400, "text/plain", "ERROR: no data available");
       }
+      //      }
     }
     else
     {
@@ -932,7 +936,7 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
 {
   // Convert \n to \0
   for (size_t i = 0; i < len; i++) {
-    Serial.print(data[i]);
+    //Serial.print(data[i]);
     if (data[i] == 10)
     {
       data[i] = 0;
@@ -971,7 +975,7 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   return true;
 }
 
-// Load setttings from file
+// Load settings from file
 bool loadSettings()
 {
   if (SPIFFS.exists("/settings.txt"))
@@ -1002,6 +1006,87 @@ bool loadSettings()
       memcpy(userGateway, buffer, 20);
     }
   }
+}
+
+// Data is saved to the *.0 files every log interval. Reload on startup
+//#define LOGITEMS_COUNT 7
+//const byte LOGFILEDAYS = 7;
+//struct LogRecord {
+//  char TimeStamp[20];
+//  char Data[LOGITEMS_COUNT][7];    // 7 items of 7 characters each
+//};
+//LogRecord logBuffer[BUFF_SIZE];
+void loadCachedData()
+{
+  ESP.wdtDisable();
+
+  char srcfile[] = "/ID.0\0";
+  char buffer[20];
+  for (int i = 0; i < 20; i++)
+  {
+    buffer[i] = 'X';
+  }
+  int row = 0;
+
+  for (byte i = 0; i < LOGITEMS_COUNT; i++)
+  {
+    row = 0;
+    char* sensorCode = getSensorCode(i);
+    memcpy(&srcfile[1], sensorCode, 2);
+    if (SPIFFS.exists(srcfile))
+    {
+      File f = SPIFFS.open(srcfile, "r");
+      while (true)
+      {
+        // Timestamp
+        if (f.available())
+        {
+          int l = f.readBytesUntil(',', buffer, sizeof(buffer));
+          if (i == 0)
+          {
+            memcpy(logBuffer[row].TimeStamp, buffer, l);;
+          }
+        }
+        // Data value
+        if (f.available()) {
+          int l = f.readBytesUntil('\n', buffer, sizeof(buffer));
+          if (l == 0)
+          {
+            // End of file not terminated with \n
+            f.readBytes(logBuffer[row].Data[i], 7);
+          }
+          else
+          {
+            //Copy into log buffer - do we need to null terminate it?
+            memcpy(logBuffer[row].Data[i], buffer, l);
+          }
+          row++;
+        }
+        else
+        {
+          // EOF
+          break;
+        }
+
+        ESP.wdtFeed();
+      }
+      f.close();
+    }
+  }
+  logPointer = row;
+  ESP.wdtEnable(1000);
+}
+
+
+void debugChar(char* buff, int len)
+{
+  for (int i = 0; i < len; i++)
+  {
+    Serial.print("[");
+    Serial.print((byte)buff[i]);
+    Serial.print("]");
+  }
+  Serial.println();
 }
 
 void restartWithDelay()
@@ -1038,7 +1123,7 @@ void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
 
-  Wire.begin(); // start the I2C library
+  //Wire.begin(); // start the I2C library
 
   // RS485 serial port
   pb100Serial.begin(BAUD_RATE, SWSERIAL_8N1, D7, D8, false, 95, 11);
@@ -1057,6 +1142,7 @@ void setup() {
     return;
   }
   loadSettings();
+  loadCachedData();
 
   pinMode(LED_BUILTIN, OUTPUT);
   if (strlen(userSSID) == 0)
@@ -1085,14 +1171,17 @@ void loop() {
   }
 
   while (pb100Serial.available()) {
-    parser << pb100Serial.read();
+    byte b = pb100Serial.read();
+    //Serial.print((char)b);
+    parser << b;
+    //parser << pb100Serial.read();
     yield();
   }
 
   timeSecond = second();
   if (timeSecond != lastSecond)
   {
-    getTemp102();
+    //getTemp102();
     // Capture time now incase processing takes longer than 1 second
     lastSecond = timeSecond;
     timeYear = year();
@@ -1114,12 +1203,10 @@ void loop() {
   }
 }
 
-// Does delay() call yield() already?
 void delayWithYield(int delayTime)
 {
   for (int i = 0; i < delayTime / 5; i++)
   {
     delay(5);
-    yield();
   }
 }
