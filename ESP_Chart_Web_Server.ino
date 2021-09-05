@@ -4,7 +4,7 @@
 
 #include <ESPAsyncWebServer.h>
 #include <Wire.h>
-#include <Adafruit_Sensor.h>
+#include <Adafruit_ADS1015.h>
 #include <SoftwareSerial.h>
 #include <NMEAParser.h>
 #include <WiFiUdp.h>
@@ -82,8 +82,8 @@ const byte GS_COL = 6;
 #define GD_ID "gd"
 #define GS_ID "gs"
 
-#define TMP102_I2C_ADDRESS 72 /* This is the I2C address for our chip. This value is correct if you tie the ADD0 pin to ground. See the datasheet for some other values. */
-
+// Optional A/D
+Adafruit_ADS1015 ads1015;
 
 // Store the log record as strings. This minimises processing when retrieving log data
 // at the expense of RAM. We could possibly change to uint32 for time and float for data values.
@@ -288,12 +288,13 @@ void handleWIMDA(void)
     bpTotal += bp;
     bpCount++;
   }
-  if (parser.getArg(4, result))
-  {
-    temp = result;
-    tempTotal += temp;
-    tempCount++;
-  }
+  // Don't use internal temperature sensor
+  //if (parser.getArg(4, result))
+  //{
+  //  temp = result;
+  //  tempTotal += temp;
+  //  tempCount++;
+  //}
   if (parser.getArg(8, result))
   {
     rh = result;
@@ -725,10 +726,21 @@ void initServerRoutes()
     request->send(response);
   });
 
+  // If client not on a 192.168 address then return version with no Settings page (blocked in the API as well)
   server.on("/app.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app.html.gz", "text/html");
-    response->addHeader("Content-Encoding", "gzip");
-    request->send(response);
+    IPAddress source = request->client()->remoteIP();
+    if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
+    {
+      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app.html.gz", "text/html");
+      response->addHeader("Content-Encoding", "gzip");
+      request->send(response);
+    }
+    else
+    {
+      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app-no-settings.html.gz", "text/html");
+      response->addHeader("Content-Encoding", "gzip");
+      request->send(response);
+    }
   });
 
   server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
@@ -797,10 +809,19 @@ void initServerRoutes()
     request->send(response);
   });
 
+  // Block anything not on a 192.168 address
   server.on("/settings.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.html.gz", "text/html");
-    response->addHeader("Content-Encoding", "gzip");
-    request->send(response);
+    IPAddress source = request->client()->remoteIP();
+    if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
+    {
+      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.html.gz", "text/html");
+      response->addHeader("Content-Encoding", "gzip");
+      request->send(response);
+    }
+    else
+    {
+      request->send(404);
+    }
   });
 
   server.on("/solid-gauge.js", HTTP_GET, [](AsyncWebServerRequest * request) {
@@ -828,14 +849,23 @@ void initServerRoutes()
   });
   //======================================================================
   // Load / Save settings API
+  // Block anything not on a 192.168 address
   server.on("/update-settings", HTTP_POST, [](AsyncWebServerRequest * request) {}, NULL, [](AsyncWebServerRequest * request, uint8_t *data, size_t len, size_t index, size_t total) {
-    if (saveSettings((char*)data, len, index, total))
+    IPAddress source = request->client()->remoteIP();
+    if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
     {
-      request->send(200);
+      if (saveSettings((char*)data, len, index, total))
+      {
+        request->send(200);
+      }
+      else
+      {
+        request->send(500);
+      }
     }
     else
     {
-      request->send(500);
+      request->send(404);
     }
   });
 
@@ -845,15 +875,24 @@ void initServerRoutes()
     restartFlag = 1;
   });
 
+  // Block anything not on a 192.168 address
   server.on("/read-settings", HTTP_GET, [](AsyncWebServerRequest * request) {
-    if (SPIFFS.exists("/settings.txt"))
+    IPAddress source = request->client()->remoteIP();
+    if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
     {
-      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.txt", "text/plain");
-      request->send(response);
+      if (SPIFFS.exists("/api-settings.txt"))
+      {
+        AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/api-settings.txt", "text/plain");
+        request->send(response);
+      }
+      else
+      {
+        request->send(200);
+      }
     }
     else
     {
-      request->send(200);
+      request->send(404);
     }
   });
 
@@ -877,12 +916,6 @@ void initServerRoutes()
     if (request->hasParam("day"))
     {
       String day = request->getParam("day")->value();
-      //      if (day == "0")
-      //      {
-      //        request->send_P(200, "text/plain", getCurrentData(sensor));
-      //      }
-      //      else
-      //      {
       String filePath = "/" + id + "." + day;
       if (SPIFFS.exists(filePath))
       {
@@ -892,7 +925,6 @@ void initServerRoutes()
       {
         request->send_P(400, "text/plain", "ERROR: no data available");
       }
-      //      }
     }
     else
     {
@@ -972,6 +1004,17 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   file.println(userIP);
   file.println(userGateway);
   file.close();
+
+  file = SPIFFS.open("/api-settings.txt", "w");
+  // Save to SPIFFS without password
+  if (!file) {
+    return false;
+  }
+  file.println(userSSID);
+  file.println(userIP);
+  file.println(userGateway);
+  file.close();
+
   return true;
 }
 
@@ -1009,13 +1052,6 @@ bool loadSettings()
 }
 
 // Data is saved to the *.0 files every log interval. Reload on startup
-//#define LOGITEMS_COUNT 7
-//const byte LOGFILEDAYS = 7;
-//struct LogRecord {
-//  char TimeStamp[20];
-//  char Data[LOGITEMS_COUNT][7];    // 7 items of 7 characters each
-//};
-//LogRecord logBuffer[BUFF_SIZE];
 void loadCachedData()
 {
   ESP.wdtDisable();
@@ -1096,24 +1132,10 @@ void restartWithDelay()
 }
 //================================================================
 
-void getTemp102()
+void readLM34()
 {
-  /* Reset the register pointer (by default it is ready to read temperatures)
-    You can alter it to a writeable register and alter some of the configuration -
-    the sensor is capable of alerting you if the temperature is above or below a specfied threshold. */
-
-  Wire.beginTransmission(TMP102_I2C_ADDRESS); //Say hi to the sensor.
-  Wire.write(0x00);
-  Wire.endTransmission();
-  Wire.requestFrom(TMP102_I2C_ADDRESS, 2);
-  Wire.endTransmission();
-
-  byte b1 = Wire.read();
-  byte b2 = Wire.read();
-
-  int temp16 = (b1 << 4) | (b2 >> 4);    // builds 12-bit value
-  float deg_c = temp16 * 0.0625;
-  temp = deg_c;
+  double a0_mV = ads1015.readADC_SingleEnded(0) * 3;
+  temp = a0_mV * 0.05557 - 17.8;
   tempTotal += temp;
   tempCount++;
 }
@@ -1123,7 +1145,7 @@ void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
 
-  //Wire.begin(); // start the I2C library
+  ads1015.begin();  // Initialize ads1015
 
   // RS485 serial port
   pb100Serial.begin(BAUD_RATE, SWSERIAL_8N1, D7, D8, false, 95, 11);
@@ -1181,7 +1203,8 @@ void loop() {
   timeSecond = second();
   if (timeSecond != lastSecond)
   {
-    //getTemp102();
+    readLM34();
+
     // Capture time now incase processing takes longer than 1 second
     lastSecond = timeSecond;
     timeYear = year();
