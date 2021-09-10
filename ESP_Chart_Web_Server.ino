@@ -19,10 +19,14 @@ IPAddress apIP(192, 168, 1, 100);
 IPAddress apGateway(192, 168, 1, 100);
 IPAddress apSubnet(255, 255, 255, 0);
 
+// User settings
 char userSSID[20];
 char userPass[20];
 char userIP[20] = "192.168.1.100";        //xxx.xxx.xxx.xxx\0
 char userGateway[20] = "192.168.1.250";   //xxx.xxx.xxx.xxx\0
+char userProxy[20] = "192.168.1.130";     //xxx.xxx.xxx.xxx\0
+int userUTCOffset = 720;
+int userElevation = 135;
 
 bool apMode = false;
 // Create AsyncWebServer object on port 80
@@ -98,11 +102,9 @@ LogRecord logBuffer[BUFF_SIZE];
 byte logPointer = 0;
 bool logBufferWrapped = false;
 
-
 //================================================================
 // NTP time synch
 static const char ntpServerName[] = "nz.pool.ntp.org";
-const int timeZone = 12;     // NZST
 const unsigned int localPort = 8888;  // local port to listen for UDP packets
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
@@ -115,6 +117,9 @@ int lastSecond = 0;
 // Connection methods
 //================================================================
 bool connectSTA(int timeout) {
+
+  // Clear previous settings
+  WiFi.disconnect(true);
 
   // Connect to Wifi.
   IPAddress ip;
@@ -151,16 +156,21 @@ bool connectSTA(int timeout) {
     }
     yield();
   }
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
   return true;
 }
 
 void connectAP()
 {
+  // Clear previous settings
+  WiFi.disconnect(true);
   WiFi.softAP(apSSID);    // open network
   WiFi.softAPConfig(apIP, apGateway, apSubnet);
   delayWithYield(100);
   apMode = true;
 }
+
 //==============================================================================
 // NTP Methods
 //==============================================================================
@@ -184,7 +194,7 @@ time_t getNtpTime()
       secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
       secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
       secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+      return secsSince1900 - 2208988800UL + userUTCOffset * 60;
     }
   }
   return 0; // return 0 if unable to get the time
@@ -281,14 +291,23 @@ char* getISO8601Time(boolean zeroSeconds)
 //------------------------------------------------------------
 void handleWIMDA(void)
 {
+  // Filter erroneous values otherwise we can get overflow of fixed width strings which corrupt log data
   float result;
+  float newVal;
   if (parser.getArg(2, result))
   {
-    bp = result * 1000;
-    bpTotal += bp;
-    bpCount++;
+    newVal = result * 1000;
+    // Correct to MSL
+    newVal = newVal * pow((1 - ((0.0065 * userElevation) / (temp + 0.0065 * userElevation + 273.15))), -5.257);
+    if (newVal < 1100 && newVal > 900)
+    {
+      bp = newVal;
+      bpTotal += bp;
+      bpCount++;
+    }
   }
   // Don't use internal temperature sensor
+  // TODO: use user configuration switch
   //if (parser.getArg(4, result))
   //{
   //  temp = result;
@@ -297,27 +316,39 @@ void handleWIMDA(void)
   //}
   if (parser.getArg(8, result))
   {
-    rh = result;
-    rhTotal += rh;
-    rhCount++;
+    newVal = result;
+    if (newVal >= 0 && newVal <= 100)
+    {
+      rh = newVal;
+      rhTotal += rh;
+      rhCount++;
+    }
   }
   if (parser.getArg(12, result))
   {
-    wdir = result;
-    float wdirRad = (wdir * 71) / 4068;
-    wdirSinTotal += sin(wdirRad);
-    wdirCosTotal += cos(wdirRad);
-    wdirCount++;
+    newVal = result;
+    if (newVal >= 0 && newVal < 360)
+    {
+      wdir = newVal;
+      float wdirRad = wdir * PI / 180;
+      wdirSinTotal += sin(wdirRad);
+      wdirCosTotal += cos(wdirRad);
+      wdirCount++;
+    }
   }
   if (parser.getArg(18, result))
   {
-    wspd = result;
-    wspdTotal += wspd;
-    wspdCount++;
-    if (wspd > wspdGust)
+    newVal = result;
+    if (newVal >= 0 && newVal < 100)
     {
-      wspdGust = wspd;
-      wdirGust = wdir;
+      wspd = newVal;
+      wspdTotal += wspd;
+      wspdCount++;
+      if (wspd > wspdGust)
+      {
+        wspdGust = wspd;
+        wdirGust = wdir;
+      }
     }
   }
 }
@@ -433,6 +464,30 @@ void shiftFiles()
   }
 }
 
+// Erase all log data files
+void eraseLogFiles()
+{
+  for (byte logItem = 0; logItem < LOGITEMS_COUNT; logItem++)
+  {
+    char* sensorCode = getSensorCode(logItem);
+    char srcfile[] = "/ID.X\0";   // e.g. /te.0
+
+    memcpy(&srcfile[1], sensorCode, 2);
+
+    for (int logDay = 0; logDay < LOGFILEDAYS; logDay++)
+    {
+      srcfile[4] = (char)(logDay + 48);
+      Serial.print("Deleting file: ");
+      Serial.print(srcfile);
+      if (SPIFFS.exists(srcfile))
+      {
+        SPIFFS.remove(srcfile);
+        Serial.println("...OK");
+      }
+    }
+  }  
+}
+
 void saveToFile(byte sensorId, char* sensorCode)
 {
   char srcfile[] = "/ID.0\0";
@@ -516,6 +571,8 @@ void saveLog()
     float meanSin = wdirSinTotal / wspdCount;
     float meanCos = wdirCosTotal / wspdCount;
     mean = atan2(meanSin, meanCos);
+    // Convert from radians to degrees
+    mean = mean * 180 / PI;
     if (mean < 0)
     {
       mean = mean + 360;
@@ -713,6 +770,7 @@ String listFiles()
   return str;
 }
 
+
 //------------------------------------------------------------
 // Handlers for HTTP requests
 //------------------------------------------------------------
@@ -848,7 +906,7 @@ void initServerRoutes()
     request->send(response);
   });
   //======================================================================
-  // Load / Save settings API
+  // Load / Save settings
   // Block anything not on a 192.168 address
   server.on("/update-settings", HTTP_POST, [](AsyncWebServerRequest * request) {}, NULL, [](AsyncWebServerRequest * request, uint8_t *data, size_t len, size_t index, size_t total) {
     IPAddress source = request->client()->remoteIP();
@@ -869,12 +927,6 @@ void initServerRoutes()
     }
   });
 
-  server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest * request) {
-    //request->send(200);
-    request->send_P(200, "text/plain", "Rebooting module, wait for module to connect to WiFi before continuing");
-    restartFlag = 1;
-  });
-
   // Block anything not on a 192.168 address
   server.on("/read-settings", HTTP_GET, [](AsyncWebServerRequest * request) {
     IPAddress source = request->client()->remoteIP();
@@ -889,6 +941,53 @@ void initServerRoutes()
       {
         request->send(200);
       }
+    }
+    else
+    {
+      request->send(404);
+    }
+  });
+
+  //======================================================================
+  // Diagnostics API
+  
+  server.on("/reboot", HTTP_POST, [](AsyncWebServerRequest * request) {
+    //request->send(200);
+    request->send_P(200, "text/plain", "Rebooting module, wait for module to connect to WiFi before continuing");
+    restartFlag = 1;
+  });
+
+  server.on("/heapfree", HTTP_GET, [](AsyncWebServerRequest * request) {
+    uint32_t free;
+    uint16_t max;
+    uint8_t frag;
+    ESP.getHeapStats(&free, &max, &frag);
+    char mem[40];   
+    int ptr=0;
+    ptr += sprintf(&mem[ptr], "Free: %d\n", free);
+    ptr += sprintf(&mem[ptr], "Max : %d\n", max);
+    ptr += sprintf(&mem[ptr], "Frag: %d\n", frag);
+    request->send_P(200, "text/plain", mem);
+  });
+
+  server.on("/files", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", listFiles().c_str());
+  });
+
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", getStatus().c_str());
+  });
+
+  server.on("/rssi", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", String(WiFi.RSSI()).c_str());
+  });
+
+  server.on("/erase", HTTP_GET, [](AsyncWebServerRequest * request) {
+    IPAddress source = request->client()->remoteIP();
+    if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
+    {
+      eraseLogFiles();
+      request->send_P(200, "text/plain", "OK");
     }
     else
     {
@@ -931,18 +1030,6 @@ void initServerRoutes()
       request->send_P(200, "text/plain", getCurrentValue(sensor).c_str());
     }
   });
-
-  server.on("/heapfree", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send_P(200, "text/plain", String(ESP.getFreeHeap()).c_str());
-  });
-
-  server.on("/files", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send_P(200, "text/plain", listFiles().c_str());
-  });
-
-  server.on("/status", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send_P(200, "text/plain", getStatus().c_str());
-  });
 }
 
 String getStatus()
@@ -968,7 +1055,6 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
 {
   // Convert \n to \0
   for (size_t i = 0; i < len; i++) {
-    //Serial.print(data[i]);
     if (data[i] == 10)
     {
       data[i] = 0;
@@ -978,21 +1064,26 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   int pos = 0;
   size_t retlen = strlcpy(userSSID, data, 20);
   pos = pos + retlen + 1;
+  Serial.println(userSSID);
 
   retlen = strlcpy(userPass, &data[pos], 20);
   pos = pos + retlen + 1;
+  Serial.println(userPass);
 
   retlen = strlcpy(userIP, &data[pos], 20);
   pos = pos + retlen + 1;
+  Serial.println(userIP);
 
-  if (pos >= len)
-  {
-    return false;
-  }
+  retlen = strlcpy(userProxy, &data[pos], 20);
+  pos = pos + retlen + 1;
+  Serial.println(userProxy);
 
-  // Whatever else is left is the gateway. This won't be null terminated
-  memcpy(userGateway, &data[pos], 20);
-  memset(&userGateway[len - pos], '\0', 1);
+  retlen = strlcpy(userProxy, &data[pos], 20);
+  pos = pos + retlen + 1;
+  Serial.println(userProxy);
+
+  userUTCOffset = atoi(&data[pos]);
+  Serial.println(userUTCOffset);
 
   File file = SPIFFS.open("/settings.txt", "w");
   // Save to SPIFFS
@@ -1003,18 +1094,21 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   file.println(userPass);
   file.println(userIP);
   file.println(userGateway);
+  file.println(userProxy);
+  file.println(userUTCOffset);
   file.close();
 
   file = SPIFFS.open("/api-settings.txt", "w");
-  // Save to SPIFFS without password
+  // Save to SPIFFS without password for sending via API
   if (!file) {
     return false;
   }
   file.println(userSSID);
   file.println(userIP);
   file.println(userGateway);
+  file.println(userProxy);
+  file.println(userUTCOffset);
   file.close();
-
   return true;
 }
 
@@ -1028,25 +1122,47 @@ bool loadSettings()
       return false;
     }
     char buffer[20];
-    if (file.available()) {
+    if (file.available())
+    {
       int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
       buffer[l - 1] = 0;
+      Serial.println(buffer);
       memcpy(userSSID, buffer, 20);
     }
-    if (file.available()) {
+    if (file.available())
+    {
       int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
       buffer[l - 1] = 0;
+      Serial.println(buffer);
       memcpy(userPass, buffer, 20);
     }
-    if (file.available()) {
+    if (file.available())
+    {
       int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
       buffer[l - 1] = 0;
+      Serial.println(buffer);
       memcpy(userIP, buffer, 20);
     }
-    if (file.available()) {
+    if (file.available())
+    {
       int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
       buffer[l - 1] = 0;
+      Serial.println(buffer);
       memcpy(userGateway, buffer, 20);
+    }
+    if (file.available())
+    {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      Serial.println(buffer);
+      memcpy(userProxy, buffer, 20);
+    }
+    if (file.available())
+    {
+      int l = file.readBytesUntil('\n', buffer, sizeof(buffer));
+      buffer[l - 1] = 0;
+      Serial.println(buffer);
+      userUTCOffset = atoi(buffer);
     }
   }
 }
@@ -1134,10 +1250,14 @@ void restartWithDelay()
 
 void readLM34()
 {
-  double a0_mV = ads1015.readADC_SingleEnded(0) * 3;
-  temp = a0_mV * 0.05557 - 17.8;
-  tempTotal += temp;
-  tempCount++;
+  float a0_mV = ads1015.readADC_SingleEnded(0) * 3;
+  float newTemp = a0_mV * 0.05557 - 17.8;
+  if (newTemp < 60)
+  {
+    temp = newTemp;
+    tempTotal += temp;
+    tempCount++;
+  }
 }
 
 //================================================================
@@ -1170,7 +1290,8 @@ void setup() {
   if (strlen(userSSID) == 0)
   {
     connectAP();
-  } else if (!connectSTA(15000))
+  }
+  else if (!connectSTA(15000))
   {
     connectAP();
   }
