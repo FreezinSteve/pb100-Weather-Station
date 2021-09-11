@@ -568,8 +568,8 @@ void saveLog()
 
   if (wdirCount > 0)
   {
-    float meanSin = wdirSinTotal / wspdCount;
-    float meanCos = wdirCosTotal / wspdCount;
+    float meanSin = wdirSinTotal / wdirCount;
+    float meanCos = wdirCosTotal / wdirCount;
     mean = atan2(meanSin, meanCos);
     // Convert from radians to degrees
     mean = mean * 180 / PI;
@@ -584,7 +584,7 @@ void saveLog()
   }
   wdirSinTotal = 0;
   wdirCosTotal = 0;
-  wspdCount = 0;
+  wdirCount = 0;
   dtostrf(mean, -4, 0, logBuffer[logPointer].Data[WD_COL]);
 
   dtostrf(wspdGust, -5, 1, logBuffer[logPointer].Data[GS_COL]);
