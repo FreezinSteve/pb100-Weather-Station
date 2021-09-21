@@ -9,6 +9,7 @@
 #include <NMEAParser.h>
 #include <WiFiUdp.h>
 #include <TimeLib.h>
+#include "LittleFS.h"
 
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns1(8, 8, 8, 8);  //DNS
@@ -37,12 +38,14 @@ SoftwareSerial pb100Serial;
 
 NMEAParser<2> parser;
 
+// Output variables
 float bp = 0;
 float temp = 0;
 float rh = 0;
 float wdir = 0;
 float wspd = 0;
 
+// Averaging variables
 float bpTotal = 0;
 float bpCount = 0;
 float tempTotal = 0;
@@ -165,7 +168,7 @@ void connectAP()
 {
   // Clear previous settings
   WiFi.disconnect(true);
-  WiFi.softAP(apSSID);    // open network
+  WiFi.softAP(apSSID, "pb100");    // just pass SSID for open network
   WiFi.softAPConfig(apIP, apGateway, apSubnet);
   delayWithYield(100);
   apMode = true;
@@ -447,16 +450,16 @@ void shiftFiles()
     dstfile[4] = (char)(LOGFILEDAYS + 48);
     srcfile[4] = (char)(LOGFILEDAYS + 48 - 1);
     // Delete the oldest file e.g te.7
-    if (SPIFFS.exists(dstfile))
+    if (LittleFS.exists(dstfile))
     {
-      SPIFFS.remove(dstfile);
+      LittleFS.remove(dstfile);
     }
 
     for (int i = LOGFILEDAYS - 1; i >= 0; i--)
     {
-      if (SPIFFS.exists(srcfile))
+      if (LittleFS.exists(srcfile))
       {
-        SPIFFS.rename(srcfile, dstfile);
+        LittleFS.rename(srcfile, dstfile);
       }
       dstfile[4] = (char)(i + 48);
       srcfile[4] = (char)(i + 48 - 1);
@@ -479,9 +482,9 @@ void eraseLogFiles()
       srcfile[4] = (char)(logDay + 48);
       Serial.print("Deleting file: ");
       Serial.print(srcfile);
-      if (SPIFFS.exists(srcfile))
+      if (LittleFS.exists(srcfile))
       {
-        SPIFFS.remove(srcfile);
+        LittleFS.remove(srcfile);
         Serial.println("...OK");
       }
     }
@@ -492,7 +495,7 @@ void saveToFile(byte sensorId, char* sensorCode)
 {
   char srcfile[] = "/ID.0\0";
   memcpy(&srcfile[1], sensorCode, 2);
-  File f = SPIFFS.open(srcfile, "w");
+  File f = LittleFS.open(srcfile, "w");
   f.write(getCurrentData(sensorId));
   f.close();
 }
@@ -755,7 +758,7 @@ char* getSensorCode(int column)
 String listFiles()
 {
   String str = "";
-  Dir dir = SPIFFS.openDir("/");
+  Dir dir = LittleFS.openDir("/");
   while (dir.next()) {
     str += dir.fileName();
     str += " [";
@@ -763,7 +766,7 @@ String listFiles()
     str += "]\r\n\r\n";
   }
   FSInfo fs_info;
-  SPIFFS.info(fs_info);
+  LittleFS.info(fs_info);
   str += "Bytes Used : " + String(fs_info.usedBytes) + "\r\n";
   str += "Bytes Total: " + String(fs_info.totalBytes) + "\r\n";
   str += "Bytes Free : " + String(fs_info.totalBytes - fs_info.usedBytes) + "\r\n";
@@ -779,7 +782,7 @@ void initServerRoutes()
   //======================================================================
   // File handlers with compression. Must be an easier way of handling multiple files...
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/index.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
@@ -789,80 +792,80 @@ void initServerRoutes()
     IPAddress source = request->client()->remoteIP();
     if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
     {
-      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app.html.gz", "text/html");
+      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/app.html.gz", "text/html");
       response->addHeader("Content-Encoding", "gzip");
       request->send(response);
     }
     else
     {
-      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/app-no-settings.html.gz", "text/html");
+      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/app-no-settings.html.gz", "text/html");
       response->addHeader("Content-Encoding", "gzip");
       request->send(response);
     }
   });
 
   server.on("/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/bootstrap.bundle.min.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/feather.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/feather.min.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/feather.min.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/highcharts.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/highcharts.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/highcharts.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/highcharts-more.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/highcharts-more.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/highcharts-more.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/index.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/jquery.min.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/jquery.min.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/jquery.min.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/logdata.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/logdata.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/logdata.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/logdatawind.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/logdatawind.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/logdatawind.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/PB100.png", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/pb100.png.gz", "text/plain");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/pb100.png.gz", "text/plain");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/realtime.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/realtime.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/realtime.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/scripts.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/scripts.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/scripts.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
@@ -872,7 +875,7 @@ void initServerRoutes()
     IPAddress source = request->client()->remoteIP();
     if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
     {
-      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/settings.html.gz", "text/html");
+      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/settings.html.gz", "text/html");
       response->addHeader("Content-Encoding", "gzip");
       request->send(response);
     }
@@ -883,25 +886,25 @@ void initServerRoutes()
   });
 
   server.on("/solid-gauge.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/solid-gauge.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/solid-gauge.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/styles.css", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/styles.css.gz", "text/css");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/styles.css.gz", "text/css");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/summary.html", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/summary.html.gz", "text/html");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/summary.html.gz", "text/html");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
 
   server.on("/windbarb.js", HTTP_GET, [](AsyncWebServerRequest * request) {
-    AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/windbarb.js.gz", "text/javascript");
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/windbarb.js.gz", "text/javascript");
     response->addHeader("Content-Encoding", "gzip");
     request->send(response);
   });
@@ -932,9 +935,9 @@ void initServerRoutes()
     IPAddress source = request->client()->remoteIP();
     if (source[0] == 192 && source[1] == 168 && source[2] == 1 && source[3] != 130)
     {
-      if (SPIFFS.exists("/api-settings.txt"))
+      if (LittleFS.exists("/api-settings.txt"))
       {
-        AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/api-settings.txt", "text/plain");
+        AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/api-settings.txt", "text/plain");
         request->send(response);
       }
       else
@@ -1016,9 +1019,9 @@ void initServerRoutes()
     {
       String day = request->getParam("day")->value();
       String filePath = "/" + id + "." + day;
-      if (SPIFFS.exists(filePath))
+      if (LittleFS.exists(filePath))
       {
-        request->send(SPIFFS, filePath, "text/plain");
+        request->send(LittleFS, filePath, "text/plain");
       }
       else
       {
@@ -1085,8 +1088,8 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   userUTCOffset = atoi(&data[pos]);
   Serial.println(userUTCOffset);
 
-  File file = SPIFFS.open("/settings.txt", "w");
-  // Save to SPIFFS
+  File file = LittleFS.open("/settings.txt", "w");
+  // Save to LittleFS
   if (!file) {
     return false;
   }
@@ -1098,8 +1101,8 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
   file.println(userUTCOffset);
   file.close();
 
-  file = SPIFFS.open("/api-settings.txt", "w");
-  // Save to SPIFFS without password for sending via API
+  file = LittleFS.open("/api-settings.txt", "w");
+  // Save to LittleFS without password for sending via API
   if (!file) {
     return false;
   }
@@ -1115,9 +1118,9 @@ bool saveSettings(char *data, size_t len, size_t index, size_t total)
 // Load settings from file
 bool loadSettings()
 {
-  if (SPIFFS.exists("/settings.txt"))
+  if (LittleFS.exists("/settings.txt"))
   {
-    File file = SPIFFS.open("/settings.txt", "r");
+    File file = LittleFS.open("/settings.txt", "r");
     if (!file) {
       return false;
     }
@@ -1185,9 +1188,9 @@ void loadCachedData()
     row = 0;
     char* sensorCode = getSensorCode(i);
     memcpy(&srcfile[1], sensorCode, 2);
-    if (SPIFFS.exists(srcfile))
+    if (LittleFS.exists(srcfile))
     {
-      File f = SPIFFS.open(srcfile, "r");
+      File f = LittleFS.open(srcfile, "r");
       while (true)
       {
         // Timestamp
@@ -1252,6 +1255,7 @@ void readLM34()
 {
   float a0_mV = ads1015.readADC_SingleEnded(0) * 3;
   float newTemp = a0_mV * 0.05557 - 17.8;
+  newTemp -= 0.1;   // Ice point cal 03/09/2021
   if (newTemp < 60)
   {
     temp = newTemp;
@@ -1277,10 +1281,10 @@ void setup() {
 
   parser.addHandler("WIMDA", handleWIMDA);
   parser.addHandler("GPZDA", handleGPZDA);
-
-  // Initialize SPIFFS
-  if (!SPIFFS.begin()) {
-    Serial.println("An Error has occurred while mounting SPIFFS");
+  
+  // Initialize LittleFS
+  if (!LittleFS.begin()) {
+    Serial.println("An Error has occurred while mounting LittleFS");
     return;
   }
   loadSettings();
