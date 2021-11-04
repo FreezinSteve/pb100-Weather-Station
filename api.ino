@@ -185,16 +185,30 @@ void initServerRoutes()
     {
       eraseLogFiles();
       request->send_P(200, "text/plain", "OK");
+      restartFlag = 1;
     }
   });
 
   server.on("/pointer", HTTP_GET, [](AsyncWebServerRequest * request) {
-    char mem[40];
+    char mem[60];
     int ptr = 0;
     ptr += sprintf(&mem[ptr], "Curr: %d\n", logPointer);
     ptr += sprintf(&mem[ptr], "Size: %d\n", BUFF_SIZE);
-    ptr += sprintf(&mem[ptr], "Wrap: %d\n", logBufferWrapped);
+    ptr += sprintf(&mem[ptr], "Wrap: %d\n", logWraps);
+    ptr += sprintf(&mem[ptr], "Next: %d\n", nextLog);
     request->send_P(200, "text/plain", mem);
+  });
+
+  server.on("/reset-reason", HTTP_GET, []
+  (AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", ESP.getResetReason().c_str());
+    // REASON_DEFAULT_RST      = 0,   /* normal startup by power on */
+    // REASON_WDT_RST         = 1,   /* hardware watch dog reset */
+    // REASON_EXCEPTION_RST   = 2,   /* exception reset, GPIO status won’t change */
+    // REASON_SOFT_WDT_RST      = 3,   /* software watch dog reset, GPIO status won’t change */
+    // REASON_SOFT_RESTART    = 4,   /* software restart ,system_restart , GPIO status won’t change */
+    // REASON_DEEP_SLEEP_AWAKE   = 5,   /* wake up from deep-sleep */
+    // REASON_EXT_SYS_RST      = 6      /* external system reset */
   });
 
   //======================================================================

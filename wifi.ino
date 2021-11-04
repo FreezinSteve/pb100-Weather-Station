@@ -1,8 +1,25 @@
 
+#define AP_SSID "Weather Station"
+#define AP_IP {192, 168, 1, 100}
+#define AP_GATEWAY {192, 168, 1, 100}
+#define AP_SUBNET {255, 255, 255, 0}
+
+#define STA_SUBNET {255, 255, 255, 0}
+#define STA_DNS1 {8, 8, 8, 8}
+#define STA_DNS2 {8, 8, 4, 4}
+
 //================================================================
 // Connection methods
 //================================================================
 bool connectSTA(int timeout) {
+
+  byte sub[] = STA_SUBNET;
+  byte addr1[] = STA_DNS1;
+  byte addr2[] = STA_DNS2;
+
+  IPAddress subnet(sub);
+  IPAddress dns1(addr1);
+  IPAddress dns2(addr2);
 
   DBG("Connecting in STA mode");
 
@@ -54,11 +71,18 @@ bool connectSTA(int timeout) {
 
 void connectAP()
 {
+  byte ip[] = AP_IP;
+  byte gw[] = AP_GATEWAY;
+  byte sub[] = AP_GATEWAY;
+  IPAddress apIP(ip);
+  IPAddress apGateway(gw);
+  IPAddress apSubnet(sub);
+
   DBG("Starting AP mode");
   // Clear previous settings
   WiFi.disconnect(true);
   WiFi.softAPConfig(apIP, apGateway, apSubnet);
-  WiFi.softAP(apSSID);    // just pass SSID for open network
+  WiFi.softAP(F(AP_SSID));    // just pass SSID for open network
   delayWithYield(100);
   apMode = true;
   DBG("AP mode started on address");

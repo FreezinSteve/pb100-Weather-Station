@@ -12,19 +12,19 @@
 #include "LittleFS.h"
 #include <ArduinoJson.h>
 
+
+//#ifdef DEBUG_ESP_PORT
+//  #define DBG(_1, ...) DEBUG_ESP_PORT.printf_P(PSTR(_1), ##__VA_ARGS__)
+//#else
+//  #define DBG(...)
+//#endif
 #define DEBUG_ON 1
 #define DEBUG_OFF 0
 byte debugMode = DEBUG_ON;
 #define DBG(...) debugMode == DEBUG_ON ? Serial.println(__VA_ARGS__) : NULL
 
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns1(8, 8, 8, 8);  //DNS
-IPAddress dns2(8, 8, 4, 4);  //DNS
 
-const char* apSSID = "Weather Station";
-IPAddress apIP(192, 168, 1, 100);
-IPAddress apGateway(192, 168, 1, 100);
-IPAddress apSubnet(255, 255, 255, 0);
+bool apMode = false;
 
 char userSSID[20];
 char userPass[20];
@@ -34,7 +34,6 @@ char userProxy[20] = "192.168.1.130";     //xxx.xxx.xxx.xxx\0
 int userUTCOffset = 720;
 int userElevation = 135;
 
-bool apMode = false;
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -108,7 +107,7 @@ struct LogRecord {
 };
 LogRecord logBuffer[BUFF_SIZE];
 byte logPointer = 0;
-bool logBufferWrapped = false;
+int logWraps = 0;
 
 //================================================================
 // NTP time synch
@@ -332,7 +331,7 @@ void saveLog()
   if (logPointer >= BUFF_SIZE)
   {
     logPointer = 0;
-    logBufferWrapped = true;
+    logWraps++;
   }
 }
 
@@ -371,7 +370,7 @@ char* getCurrentData(int sensor)
   static char buffer[28 * BUFF_SIZE];
   //dd-mm-yyyyThh:mm:ss,xxxx.x\n   - worst case
   buffer[0] = 0;
-  if (logBufferWrapped)
+  if (logWraps > 0)
   {
     for (int record = logPointer; record < BUFF_SIZE; record++)
     {
@@ -583,6 +582,11 @@ void loadCachedData()
     }
   }
   logPointer = row;
+  if (logPointer >= BUFF_SIZE)
+  {
+    logPointer = 0;
+    logWraps = 1;
+  }
   ESP.wdtEnable(1000);
 }
 
@@ -623,6 +627,7 @@ void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
 
+  DBG("Starting program");
   ads1015.begin();  // Initialize ads1015
 
   // RS485 serial port

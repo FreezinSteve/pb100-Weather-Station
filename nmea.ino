@@ -6,11 +6,13 @@ void handleWIMDA(void)
   // Filter erroneous values otherwise we can get overflow of fixed width strings which corrupt log data
   float result;
   float newVal;
+  static float lastWspd;
+  
   if (parser.getArg(2, result))
   {
     newVal = result * 1000;
     // Correct to MSL
-    newVal = newVal * pow((1 - ((0.0065 * userElevation) / (temp + 0.0065 * userElevation + 273.15))), -5.257);
+    //newVal = newVal * pow((1 - ((0.0065 * userElevation) / (temp + 0.0065 * userElevation + 273.15))), -5.257);
     if (newVal < 1100 && newVal > 900)
     {
       bp = newVal;
@@ -51,22 +53,21 @@ void handleWIMDA(void)
   if (parser.getArg(18, result))
   {
     newVal = result;
-    if (newVal >= 0 && newVal < 100)
+    if (newVal >= 0 && newVal < 40)
     {
-      float last_wspd = wspd;
-      wspd = newVal;
-      wspdTotal += wspd;
-      wspdCount++;
-      // If the current wind speed is < 10 times the last wind speed, then assume it's OK. Otherwise
+      // If the new wind speed is < 10 times the last wind speed, then assume it's OK. Otherwise
       // ignore as a false gust. 
-      // TODO: false WS will still skew the mean
-      if ((last_wspd * 10) < wspd)
-      {    
+      if (lastWspd == 0 || newVal < (lastWspd * 10))
+      {
+        wspd = newVal;
+        wspdTotal += wspd;
+        wspdCount++;
         if (wspd > wspdGust)
         {
           wspdGust = wspd;
           wdirGust = wdir;
         }
+        lastWspd = wspd;
       }
     }
   }
