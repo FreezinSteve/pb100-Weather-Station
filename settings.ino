@@ -1,7 +1,7 @@
 
 bool parseSettings(char *data)
 {
-  StaticJsonDocument<96> doc;      // ArduinoJSON suggested RAM for given input
+  StaticJsonDocument<128> doc;      // ArduinoJSON suggested RAM for given input
   // Deserialize the JSON document
   DeserializationError error = deserializeJson(doc, data);
 
@@ -66,6 +66,10 @@ bool saveSettings()
   file.print(userProxy);
   file.print("\",\"utcoffset\":\"");
   file.print(userUTCOffset);
+  file.print("\",\"wowid\":\"");
+  file.print("");
+  file.print("\",\"wowkey\":\"");
+  file.print("");  
   file.print("\"}");
   file.close();
 
@@ -86,6 +90,10 @@ bool saveSettings()
   file.print(userProxy);
   file.print("\",\"utcoffset\":\"");
   file.print(userUTCOffset);
+  file.print("\",\"wowid\":\"");
+  file.print("");
+  file.print("\",\"wowkey\":\"");
+  file.print("");  
   file.print("\"}");
   file.close();
 

@@ -335,6 +335,17 @@ void saveLog()
   }
 }
 
+
+void saveResetReason()
+{
+  File f = LittleFS.open("resets.txt", "w");
+  f.write(getISO8601Time(false));
+  f.write(" - ");
+  f.write(ESP.getResetReason().c_str());
+  f.write("\r\n");
+  f.close();
+}
+
 //------------------------------------------------------------
 // Map sensor ID to sensor value
 //------------------------------------------------------------
@@ -669,6 +680,8 @@ void setup() {
   // Init NTP and time
   setSyncProvider(getNtpTime);
   setSyncInterval(3600);
+
+  saveResetReason();
 }
 
 void loop() {

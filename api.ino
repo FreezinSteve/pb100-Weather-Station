@@ -127,6 +127,18 @@ void initServerRoutes()
     request->send(response);
   });
 
+  server.on("/download.html", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/download.html.gz", "text/html");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
+
+
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest * request) {
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/favicon.ico.gz", "image/x-icon");
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
   //======================================================================
   // Load / Save settings
   // Block anything not on a 192.168 address
@@ -199,16 +211,17 @@ void initServerRoutes()
     request->send_P(200, "text/plain", mem);
   });
 
-  server.on("/reset-reason", HTTP_GET, []
+  server.on("/resets", HTTP_GET, []
   (AsyncWebServerRequest * request) {
-    request->send_P(200, "text/plain", ESP.getResetReason().c_str());
-    // REASON_DEFAULT_RST      = 0,   /* normal startup by power on */
-    // REASON_WDT_RST         = 1,   /* hardware watch dog reset */
-    // REASON_EXCEPTION_RST   = 2,   /* exception reset, GPIO status won’t change */
-    // REASON_SOFT_WDT_RST      = 3,   /* software watch dog reset, GPIO status won’t change */
-    // REASON_SOFT_RESTART    = 4,   /* software restart ,system_restart , GPIO status won’t change */
-    // REASON_DEEP_SLEEP_AWAKE   = 5,   /* wake up from deep-sleep */
-    // REASON_EXT_SYS_RST      = 6      /* external system reset */
+    if (LittleFS.exists("/resets.txt"))
+    {
+      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/resets.txt", "text/plain");
+      request->send(response);
+    }
+    else
+    {
+      request->send(200);
+    }
   });
 
   //======================================================================
@@ -217,7 +230,7 @@ void initServerRoutes()
     if (!request->hasParam("id"))
     {
       // Send error
-      request->send_P(400, "text/plain", "ERROR: No sensor id query ?id=xx");
+      request->send_P(400, "text/plain", "ERROR: No sensor id query ?id=xx&day=y");
       return;
     }
     String id = request->getParam("id")->value();
@@ -225,7 +238,7 @@ void initServerRoutes()
     if (sensor < 0)
     {
       // Send error
-      request->send_P(400, "text/plain", "ERROR: Invalid sensor id query ?id=??");
+      request->send_P(400, "text/plain", "ERROR: Invalid sensor id query ?id=??&day=y");
       return;
     }
     if (request->hasParam("day"))
@@ -238,12 +251,14 @@ void initServerRoutes()
       }
       else
       {
-        request->send_P(400, "text/plain", "ERROR: no data available");
+        // File doesn't exist yet, return empty response
+        request->send(200);
       }
     }
     else
     {
-      request->send_P(200, "text/plain", getCurrentValue(sensor).c_str());
+      request->send_P(400, "text/plain", "ERROR: Invalid sensor day query ?id=xx&day=y");
+      return;
     }
   });
 }
