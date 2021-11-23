@@ -9,7 +9,8 @@ Data is viewable using a web browser, served web page feartures an HTML5 web app
 
 <img src="images/summary_page.jpg">
 
-# Software Environment
+
+# Arduino Software Environment
 
 Built with Arduino 1.8.13
 
@@ -22,11 +23,18 @@ Libraries:
  - ESPSoftwareSerial by Dirk Kaar 6.12.7 (from IDE libraries)
  - Time by Michael Margolis Version 1. (http://playground.arduino.cc/code/time)
 
+# HTML
+
+Built using Pycharm to run the test web server and HTML / Javascript editing using VSCode 
+See repo https://github.com/FreezinSteve/weather-station-test-webserver
+ - Highcharts graphing library (https://www.highcharts.com/)
+ - Feather Icons (https://feathericons.com/)
+ - Bootstrap 5 (https://getbootstrap.com/)
+ 
 # Hardware 
 
-Airmar PB100 - integrated weather station wind/temperature/pressure/rh + GPS
-ESP8266 - Wemos D1 Mini (clone)
-RS485 to TTL interface - cheap from Aliexpress
-ADS1015 - Sparkfun breakout board
-LM34 temperature sensor 
+ - Airmar PB100: integrated weather station wind/temperature/pressure/rh + GPSESP8266 - Wemos D1 Mini (clone)
+ - RS485 to TTL interface: cheap from Aliexpress
+ - ADS1015: Sparkfun breakout board (optional for LM34 or other analogue sensors)
+ - LM34 temperature sensor (optional as PB100 sensor is poor quality and prone to self-heating) 
 
