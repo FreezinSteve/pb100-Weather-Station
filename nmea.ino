@@ -7,22 +7,24 @@ void handleWIMDA(void)
   float result;
   float newVal;
   static float lastWspd;
-  
-  if (parser.getArg(2, result))
-  {
-    newVal = result * 1000;
-    // Apply (preliminary) correction BP = 1.0063x - 9.3203
-    newVal = 1.0063 * newVal - 9.3203;    
-    
-    // Correct to MSL
-    //newVal = newVal * pow((1 - ((0.0065 * userElevation) / (temp + 0.0065 * userElevation + 273.15))), -5.257);    
-    if (newVal < 1100 && newVal > 900)
-    {
-      bp = newVal;
-      bpTotal += bp;
-      bpCount++;
-    }
-  }
+
+// Don't use internal BP sensor
+//  if (parser.getArg(2, result))
+//  {
+//    newVal = result * 1000;
+//    // Apply (preliminary) correction BP = 1.0063x - 9.3203
+//    newVal = 1.0063 * newVal - 9.3203;    
+//    
+//    // Correct to MSL
+//    //newVal = newVal * pow((1 - ((0.0065 * userElevation) / (temp + 0.0065 * userElevation + 273.15))), -5.257);    
+//    if (newVal < 1100 && newVal > 900)
+//    {
+//      bp = newVal;
+//      bpTotal += bp;
+//      bpCount++;
+//    }
+//  }
+
   // Don't use internal temperature sensor
   // TODO: use user configuration switch
   //if (parser.getArg(4, result))

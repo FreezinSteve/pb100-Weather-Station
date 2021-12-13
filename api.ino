@@ -192,6 +192,7 @@ void initServerRoutes()
     request->send_P(200, "text/plain", String(WiFi.RSSI()).c_str());
   });
 
+  //TODO: Should this be POST? GET lets us use a browser though
   server.on("/erase", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (isLocalRequest(request, true))
     {

@@ -5,6 +5,8 @@
 #include <ESPAsyncWebServer.h>
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
 #include <SoftwareSerial.h>
 #include <NMEAParser.h>
 #include <WiFiUdp.h>
@@ -96,6 +98,9 @@ const byte GS_COL = 6;
 // Optional A/D
 Adafruit_ADS1015 ads1015;
 
+// Optional BMP280 pressure sensor
+Adafruit_BMP280 bme; // I2C
+
 // Store the log record as strings. This minimises processing when retrieving log data
 // at the expense of RAM. We could possibly change to uint32 for time and float for data values.
 // This would save about 40% RAM
@@ -109,6 +114,10 @@ LogRecord logBuffer[BUFF_SIZE];
 byte logPointer = 0;
 int logWraps = 0;
 
+// Rolling BP 3hr (180 minute) buffer
+const byte BPBuffLen = 180 / logInt;
+float BPBuffer[BPBuffLen];
+int BPPointer = -1;
 //================================================================
 // NTP time synch
 static const char ntpServerName[] = "nz.pool.ntp.org";
@@ -236,13 +245,13 @@ void saveToFile(byte sensorId, char* sensorCode)
 //------------------------------------------------------------
 void setNextLog()
 {
-  nextLog = ((timeMinute / 10) * 10) + 10;
+  nextLog = ((timeMinute / logInt) * logInt) + logInt;
   //nextLog = timeMinute + 1;
   if (nextLog >= 60)
   {
     nextLog -= 60;
   }
-}
+ }
 
 //------------------------------------------------------------
 // Save data to log buffer
@@ -263,6 +272,7 @@ void saveLog()
   bpTotal = 0;
   bpCount = 0;
   dtostrf(mean, -7, 1, logBuffer[logPointer].Data[BP_COL]);
+  updateBPBuffer(mean);
 
   if (tempCount > 0)
   {
@@ -335,6 +345,46 @@ void saveLog()
   }
 }
 
+// Rolling buffer of barometric pressure so we can keep track of the 3 hour change
+// Note if we shift to storing data as floats, we won't need this!
+void updateBPBuffer(float meanBP)
+{
+  if (BPPointer == -1)
+  {
+    // Init rolling buffer
+    for (int i = 0; i < BPBuffLen ; i++)
+    {
+      BPBuffer[i] = meanBP;
+    }
+    BPPointer = 1;
+  }
+  else
+  {
+    BPBuffer[BPPointer] = meanBP;
+    BPPointer ++;
+    if (BPPointer >= BPBuffLen)
+    {
+      BPPointer = 0;
+    }
+  }
+}
+
+String getBP3HrChange()
+{
+  if (BPPointer == -1)
+  {
+    return String("0.0");
+  }
+  else
+  {
+    int pntr = BPPointer - 1;   // pntr = newest value in buffer, BPPointer = oldest value in buffer
+    if (pntr < 0)
+    {
+      pntr = BPBuffLen - 1;
+    }
+    return String(BPBuffer[pntr] - BPBuffer[BPPointer], 1);
+  }
+}
 
 void saveResetReason()
 {
@@ -517,7 +567,7 @@ String listFiles()
 
 String getStatus()
 {
-  //{"dt": "2021-08-07T20:19:47", "te": "5.4", "ws": "99.5", "wd": "235", "rh": "19.0", "bp": "1052.2"}
+  //{"dt": "2021-08-07T20:19:47", "te": "5.4", "ws": "99.5", "wd": "235", "rh": "19.0", "bp": "1052.2", "b3hr: "-0.2"}
   String response = "{\"dt\": \"";
   response += String(getISO8601Time(false));
   response += "\", \"te\": \"";
@@ -530,6 +580,8 @@ String getStatus()
   response += getCurrentValue(RH_COL);
   response += "\", \"bp\": \"";
   response += getCurrentValue(BP_COL);
+  response += "\", \"bp3hc\": \"";
+  response += getBP3HrChange();
   response += "\"}";
   return response;
 }
@@ -634,14 +686,28 @@ void readLM34()
 }
 
 //================================================================
+void readBMP280()
+{
+  bp = bme.readPressure() / 100;
+  bpTotal += bp;
+  bpCount++;
+}
+
+//================================================================
 void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
 
   DBG("Starting program");
+
+  DBG("Init ADS1015 A/D");
   ads1015.begin();  // Initialize ads1015
 
+  DBG("Init BMP280");
+  bme.begin();
+
   // RS485 serial port
+  DBG("Init RS485 software serial port");
   pb100Serial.begin(BAUD_RATE, SWSERIAL_8N1, D7, D8, false, 95, 11);
 
   // Send config data
@@ -703,6 +769,7 @@ void loop() {
   if (timeSecond != lastSecond)
   {
     readLM34();
+    readBMP280();
 
     // Capture time now incase processing takes longer than 1 second
     lastSecond = timeSecond;
