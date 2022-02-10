@@ -69,7 +69,7 @@ bool saveSettings()
   file.print("\",\"wowid\":\"");
   file.print("");
   file.print("\",\"wowkey\":\"");
-  file.print("");  
+  file.print("");
   file.print("\"}");
   file.close();
 
@@ -93,7 +93,7 @@ bool saveSettings()
   file.print("\",\"wowid\":\"");
   file.print("");
   file.print("\",\"wowkey\":\"");
-  file.print("");  
+  file.print("");
   file.print("\"}");
   file.close();
 
@@ -124,4 +124,10 @@ bool loadSettings()
       parseSettings(buffer);
     }
   }
+  else
+  {
+    // Save defaults
+    saveSettings();
+  }
+  return true;
 }

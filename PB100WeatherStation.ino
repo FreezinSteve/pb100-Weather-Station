@@ -544,48 +544,6 @@ char* getSensorCode(int column)
   }
 }
 
-//------------------------------------------------------------
-// Return file list and used/free bytes
-//------------------------------------------------------------
-String listFiles()
-{
-  String str = "";
-  Dir dir = LittleFS.openDir("/");
-  while (dir.next()) {
-    str += dir.fileName();
-    str += " [";
-    str += dir.fileSize();
-    str += "]\r\n\r\n";
-  }
-  FSInfo fs_info;
-  LittleFS.info(fs_info);
-  str += "Bytes Used : " + String(fs_info.usedBytes) + "\r\n";
-  str += "Bytes Total: " + String(fs_info.totalBytes) + "\r\n";
-  str += "Bytes Free : " + String(fs_info.totalBytes - fs_info.usedBytes) + "\r\n";
-  return str;
-}
-
-String getStatus()
-{
-  //{"dt": "2021-08-07T20:19:47", "te": "5.4", "ws": "99.5", "wd": "235", "rh": "19.0", "bp": "1052.2", "b3hr: "-0.2"}
-  String response = "{\"dt\": \"";
-  response += String(getISO8601Time(false));
-  response += "\", \"te\": \"";
-  response += getCurrentValue(TE_COL);
-  response += "\", \"ws\": \"";
-  response += getCurrentValue(WS_COL);
-  response += "\", \"wd\": \"";
-  response += getCurrentValue(WD_COL);
-  response += "\", \"rh\": \"";
-  response += getCurrentValue(RH_COL);
-  response += "\", \"bp\": \"";
-  response += getCurrentValue(BP_COL);
-  response += "\", \"bp3hc\": \"";
-  response += getBP3HrChange();
-  response += "\"}";
-  return response;
-}
-
 // Data is saved to the *.0 files every log interval. Reload on startup
 void loadCachedData()
 {
@@ -689,6 +647,8 @@ void readLM34()
 void readBMP280()
 {
   bp = bme.readPressure() / 100;
+  // Apply calibration correction y = 1.0616x - 64.535
+  bp = bp * 1.0616 - 64.535;
   bpTotal += bp;
   bpCount++;
 }

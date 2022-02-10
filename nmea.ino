@@ -33,12 +33,15 @@ void handleWIMDA(void)
   //  tempTotal += temp;
   //  tempCount++;
   //}
+  
   if (parser.getArg(8, result))
   {
     newVal = result;
     if (newVal >= 0 && newVal <= 100)
     {
       rh = newVal;
+      // Rough cal, maximum recorded value = 85 even though it should have been ~ 100
+      rh = rh * 1.163; 
       rhTotal += rh;
       rhCount++;
     }

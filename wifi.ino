@@ -73,7 +73,7 @@ void connectAP()
 {
   byte ip[] = AP_IP;
   byte gw[] = AP_GATEWAY;
-  byte sub[] = AP_GATEWAY;
+  byte sub[] = AP_SUBNET;
   IPAddress apIP(ip);
   IPAddress apGateway(gw);
   IPAddress apSubnet(sub);
@@ -81,6 +81,9 @@ void connectAP()
   DBG("Starting AP mode");
   // Clear previous settings
   WiFi.disconnect(true);
+  DBG(apIP);
+  DBG(apGateway);
+  DBG(apSubnet);
   WiFi.softAPConfig(apIP, apGateway, apSubnet);
   WiFi.softAP(F(AP_SSID));    // just pass SSID for open network
   delayWithYield(100);
